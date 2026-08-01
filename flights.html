@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICPS 2028 Delhi - Interactive IAPS Travel Map</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3"></script>
+  <style>
+    :root {
+      --bg-color: #0b0f19;
+      --card-bg: rgba(22, 30, 46, 0.85);
+      --accent-color: #00f2fe;
+      --accent-orange: #ff9900;
+      --text-main: #f0f4f8;
+      --text-muted: #94a3b8;
+      --border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 12px 24px;
+      background: rgba(11, 15, 25, 0.9);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: #ffffff;
+    }
+
+    header span {
+      font-size: 0.85rem;
+      color: var(--accent-color);
+      background: rgba(0, 242, 254, 0.1);
+      padding: 4px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 242, 254, 0.2);
+    }
+
+    #map-container {
+      flex: 1;
+      width: 100%;
+      position: relative;
+      cursor: default; /* Changed from grab to standard arrow */
+    }
+
+    .country {
+      fill: #1e293b;
+      stroke: #334155;
+      stroke-width: 0.6px;
+      transition: all 0.25s ease;
+    }
+
+    .country:hover {
+      fill: #3b82f6;
+      stroke: #60a5fa;
+      stroke-width: 1.2px;
+      cursor: default; /* Changed from pointer to standard arrow */
+    }
+
+    .country.has-data {
+      fill: #1e3a8a;
+    }
+
+    .country.has-data:hover {
+      fill: #2563eb;
+    }
+
+    .country.india {
+      fill: #14532d !important;
+      stroke: #22c55e !important;
+      stroke-width: 1px !important;
+      stroke-linejoin: round;
+    }
+
+    .flight-arc {
+      fill: none;
+      stroke: var(--accent-orange);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-dasharray: 6 4;
+      animation: dash 1.5s linear infinite;
+    }
+
+    @keyframes dash {
+      to { stroke-dashoffset: -20; }
+    }
+
+    .delhi-marker {
+      fill: #ef4444;
+      stroke: #ffffff;
+      stroke-width: 1.5px;
+    }
+
+    .delhi-pulse {
+      fill: rgba(239, 68, 68, 0.4);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { r: 4px; opacity: 1; }
+      100% { r: 18px; opacity: 0; }
+    }
+
+    /* Fixed Bottom Bar */
+    #info-bar {
+      height: 90px;
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+      z-index: 10;
+    }
+
+    .bar-section {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .flag {
+      font-size: 2.5rem;
+      line-height: 1;
+    }
+    
+    .flag-img {
+      width: 48px;
+      height: auto;
+      border-radius: 4px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+      display: none; /* hidden until hovered */
+    }
+
+    .country-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    .country-sub {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .info-group {
+      display: flex;
+      gap: 32px;
+    }
+
+    .info-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .info-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+
+    .info-value {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .highlight-val {
+      color: var(--accent-color);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>ICPS 2028 Delhi — IAPS Member Delegate Travel Map</h1>
+    <span>Destination: New Delhi (DEL)</span>
+  </header>
+
+  <div id="map-container"></div>
+
+  <div id="info-bar">
+    <div class="bar-section" id="country-info">
+      <!-- Fallback globe emoji, replaced by proper image flag on hover -->
+      <span class="flag" id="val-flag-emoji">🌏</span>
+      <img src="" id="val-flag-img" class="flag-img" alt="Flag" />
+      <div>
+        <div class="country-title" id="val-name">Hover over a highlighted member country</div>
+        <div class="country-sub" id="val-sub">View roundtrip airfare baseline, duration, and visa requirements to Delhi</div>
+      </div>
+    </div>
+
+    <div class="info-group" id="data-items" style="display: none;">
+      <div class="info-item">
+        <span class="info-label">Capital City</span>
+        <span class="info-value" id="val-capital">-</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Visa Entry Type</span>
+        <span class="info-value" id="val-visa">-</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Visa Fee</span>
+        <span class="info-value" id="val-visa-fee">-</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Est. Roundtrip Flight</span>
+        <span class="info-value highlight-val" id="val-flight">-</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Est. Travel Time (One-Way)</span>
+        <span class="info-value" id="val-time">-</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Database of IAPS Member Countries with Added ISO-2 Codes for Flag CDN
+    const memberData = {
+      "CAN": { name: "Canada", iso2: "ca", capital: "Ottawa", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,100 - €1,500", time: "14 - 18 hrs", lat: 56.1304, lon: -106.3468 },
+      "ARG": { name: "Argentina", iso2: "ar", capital: "Buenos Aires", visa: "e-Visa", visaFee: "€0 (Gratis)", flight: "€1,800 - €2,200", time: "24 - 28 hrs", lat: -38.4161, lon: -63.6167 },
+      "AUT": { name: "Austria", iso2: "at", capital: "Vienna", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "7 - 11 hrs", lat: 47.5162, lon: 14.5501 },
+      "KAZ": { name: "Kazakhstan", iso2: "kz", capital: "Astana", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€400 - €600", time: "4 - 8 hrs", lat: 48.0196, lon: 66.9237 },
+      "GHA": { name: "Ghana", iso2: "gh", capital: "Accra", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€800 - €1,100", time: "12 - 15 hrs", lat: 7.9465, lon: -1.0232 },
+      "USA": { name: "USA", iso2: "us", capital: "Washington, D.C.", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,000 - €1,500", time: "14 - 19 hrs", lat: 37.0902, lon: -95.7129 },
+      "CRI": { name: "Costa Rica", iso2: "cr", capital: "San José", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,500 - €1,900", time: "22 - 26 hrs", lat: 9.7489, lon: -83.7534 },
+      "HRV": { name: "Croatia", iso2: "hr", capital: "Zagreb", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "10 - 13 hrs", lat: 45.1, lon: 15.2 },
+      "KOR": { name: "South Korea", iso2: "kr", capital: "Seoul", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€550 - €750", time: "7.5 - 12 hrs", lat: 35.9078, lon: 127.7669 },
+      "MAR": { name: "Morocco", iso2: "ma", capital: "Rabat", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€700 - €950", time: "11 - 14 hrs", lat: 31.7917, lon: -7.0926 },
+      "MEX": { name: "Mexico", iso2: "mx", capital: "Mexico City", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,400 - €1,800", time: "22 - 26 hrs", lat: 23.6345, lon: -102.5528 },
+      "GTM": { name: "Guatemala", iso2: "gt", capital: "Guatemala City", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,500 - €1,900", time: "23 - 27 hrs", lat: 15.7835, lon: -90.2308 },
+      "CZE": { name: "Czechia", iso2: "cz", capital: "Prague", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "10 - 12 hrs", lat: 49.8175, lon: 15.473 },
+      "PHL": { name: "Philippines", iso2: "ph", capital: "Manila", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€450 - €650", time: "9 - 12 hrs", lat: 12.8797, lon: 121.774 },
+      "TUN": { name: "Tunisia", iso2: "tn", capital: "Tunis", visa: "Regular Visa", visaFee: "~€85", flight: "€700 - €900", time: "11 - 14 hrs", lat: 33.8869, lon: 9.5375 },
+      "HND": { name: "Honduras", iso2: "hn", capital: "Tegucigalpa", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,500 - €1,900", time: "24 - 28 hrs", lat: 15.2, lon: -86.24 },
+      "DNK": { name: "Denmark", iso2: "dk", capital: "Copenhagen", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "10 - 12 hrs", lat: 56.2639, lon: 9.5018 },
+      "SGP": { name: "Singapore", iso2: "sg", capital: "Singapore", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€300 - €450", time: "5.5 - 6 hrs", lat: 1.3521, lon: 103.8198 },
+      "URY": { name: "Uruguay", iso2: "uy", capital: "Montevideo", visa: "e-Visa", visaFee: "€0 (Gratis)", flight: "€1,800 - €2,200", time: "25 - 29 hrs", lat: -32.5228, lon: -55.7658 },
+      "BIH": { name: "Bosnia & Herzegovina", iso2: "ba", capital: "Sarajevo", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€700 - €900", time: "10 - 13 hrs", lat: 43.9159, lon: 17.6791 },
+      "TWN": { name: "Taiwan", iso2: "tw", capital: "Taipei", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€500 - €700", time: "8 - 11 hrs", lat: 23.6978, lon: 120.9605 },
+      "CMR": { name: "Cameroon", iso2: "cm", capital: "Yaoundé", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€900 - €1,200", time: "13 - 16 hrs", lat: 7.3697, lon: 12.3547 },
+      "FIN": { name: "Finland", iso2: "fi", capital: "Helsinki", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "7 - 11 hrs", lat: 61.9241, lon: 25.7482 },
+      "TUR": { name: "Turkey", iso2: "tr", capital: "Ankara", visa: "Regular Visa", visaFee: "~€85", flight: "€450 - €650", time: "6.5 - 10 hrs", lat: 38.9637, lon: 35.2433 },
+      "ECU": { name: "Ecuador", iso2: "ec", capital: "Quito", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,700 - €2,100", time: "24 - 28 hrs", lat: -1.8312, lon: -78.1834 },
+      "FRA": { name: "France", iso2: "fr", capital: "Paris", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "8 - 11 hrs", lat: 46.2276, lon: 2.2137 },
+      "DOM": { name: "Dominican Republic", iso2: "do", capital: "Santo Domingo", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,400 - €1,800", time: "22 - 26 hrs", lat: 18.7357, lon: -70.1627 },
+      "GEO": { name: "Georgia", iso2: "ge", capital: "Tbilisi", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€450 - €650", time: "8 - 10 hrs", lat: 42.3154, lon: 43.3569 },
+      "AZE": { name: "Azerbaijan", iso2: "az", capital: "Baku", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€400 - €600", time: "4 - 8 hrs", lat: 40.1431, lon: 47.5769 },
+      "PER": { name: "Peru", iso2: "pe", capital: "Lima", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€1,800 - €2,200", time: "25 - 30 hrs", lat: -9.19, lon: -75.0152 },
+      "DEU": { name: "Germany", iso2: "de", capital: "Berlin", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "7.5 - 11 hrs", lat: 51.1657, lon: 10.4515 },
+      "IRN": { name: "Iran", iso2: "ir", capital: "Tehran", visa: "Regular Visa", visaFee: "~€85", flight: "€350 - €550", time: "4.5 - 8 hrs", lat: 32.4279, lon: 53.688 },
+      "GRC": { name: "Greece", iso2: "gr", capital: "Athens", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "9 - 11 hrs", lat: 39.0742, lon: 21.8243 },
+      "ISR": { name: "Israel", iso2: "il", capital: "Jerusalem", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€500 - €700", time: "7 - 11 hrs", lat: 31.0461, lon: 34.8516 },
+      "HUN": { name: "Hungary", iso2: "hu", capital: "Budapest", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "10 - 12 hrs", lat: 47.1625, lon: 19.5033 },
+      "NPL": { name: "Nepal", iso2: "np", capital: "Kathmandu", visa: "Visa-Free", visaFee: "€0", flight: "€150 - €250", time: "1.5 hrs", lat: 28.3949, lon: 84.124 },
+      "ITA": { name: "Italy", iso2: "it", capital: "Rome", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "7.5 - 11 hrs", lat: 41.8719, lon: 12.5674 },
+      "RUS": { name: "Russia", iso2: "ru", capital: "Moscow", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €850", time: "8 - 11 hrs", lat: 61.524, lon: 105.3188 },
+      "MKD": { name: "North Macedonia", iso2: "mk", capital: "Skopje", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "10 - 13 hrs", lat: 41.6086, lon: 21.7453 },
+      "LBN": { name: "Lebanon", iso2: "lb", capital: "Beirut", visa: "Regular Visa", visaFee: "~€85", flight: "€500 - €700", time: "8 - 11 hrs", lat: 33.8547, lon: 35.8623 },
+      "MNE": { name: "Montenegro", iso2: "me", capital: "Podgorica", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "10 - 13 hrs", lat: 42.7087, lon: 19.3744 },
+      "NLD": { name: "Netherlands", iso2: "nl", capital: "Amsterdam", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "8.5 - 12 hrs", lat: 52.1326, lon: 5.2913 },
+      "NOR": { name: "Norway", iso2: "no", capital: "Oslo", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "10 - 12 hrs", lat: 60.472, lon: 8.4689 },
+      "POL": { name: "Poland", iso2: "pl", capital: "Warsaw", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "7.5 - 11 hrs", lat: 51.9194, lon: 19.1451 },
+      "PRT": { name: "Portugal", iso2: "pt", capital: "Lisbon", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "11 - 13 hrs", lat: 39.3999, lon: -8.2245 },
+      "SRB": { name: "Serbia", iso2: "rs", capital: "Belgrade", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "10 - 12 hrs", lat: 44.0165, lon: 21.0059 },
+      "ESP": { name: "Spain", iso2: "es", capital: "Madrid", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "11 - 13 hrs", lat: 40.4637, lon: -3.7492 },
+      "CHE": { name: "Switzerland", iso2: "ch", capital: "Bern", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "8.5 - 11 hrs", lat: 46.8182, lon: 8.2275 },
+      "GBR": { name: "UK", iso2: "gb", capital: "London", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "8.5 - 12 hrs", lat: 55.3781, lon: -3.436 },
+      "IRL": { name: "Ireland", iso2: "ie", capital: "Dublin", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "11 - 13 hrs", lat: 53.1424, lon: -7.6921 },
+      "ROU": { name: "Romania", iso2: "ro", capital: "Bucharest", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "9 - 11 hrs", lat: 45.9432, lon: 24.9668 },
+      "UKR": { name: "Ukraine", iso2: "ua", capital: "Kyiv", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€700 - €900", time: "12 - 16 hrs", lat: 48.3794, lon: 31.1656 },
+      "MLT": { name: "Malta", iso2: "mt", capital: "Valletta", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€650 - €850", time: "10 - 13 hrs", lat: 35.9375, lon: 14.3754 },
+      "SVN": { name: "Slovenia", iso2: "si", capital: "Ljubljana", visa: "e-Visa", visaFee: "€23 ($25 USD)", flight: "€600 - €800", time: "10 - 12 hrs", lat: 46.1512, lon: 14.9955 }
+    };
+
+    const delhiCoords = [77.2090, 28.6139]; 
+
+    const container = d3.select("#map-container");
+    const width = container.node().getBoundingClientRect().width;
+    const height = container.node().getBoundingClientRect().height;
+
+    const svg = container.append("svg")
+      .attr("width", "100%")
+      .attr("height", "100%")
+      .attr("viewBox", `0 0 ${width} ${height}`);
+
+    const g = svg.append("g");
+
+    const projection = d3.geoMercator()
+      .scale(width / 6.5)
+      .translate([width / 2.2, height / 1.5]);
+
+    const path = d3.geoPath().projection(projection);
+
+    const countriesGroup = g.append("g").attr("id", "countries");
+    const routeGroup = g.append("g").attr("id", "routes");
+    const markerGroup = g.append("g").attr("id", "markers");
+
+    // Delhi Pin
+    const delhiPos = projection(delhiCoords);
+    
+    markerGroup.append("circle")
+      .attr("cx", delhiPos[0])
+      .attr("cy", delhiPos[1])
+      .attr("class", "delhi-pulse");
+
+    markerGroup.append("circle")
+      .attr("cx", delhiPos[0])
+      .attr("cy", delhiPos[1])
+      .attr("r", 5)
+      .attr("class", "delhi-marker");
+
+    markerGroup.append("text")
+      .attr("x", delhiPos[0] + 8)
+      .attr("y", delhiPos[1] + 4)
+      .text("Delhi (DEL)")
+      .attr("fill", "#ffffff")
+      .attr("font-size", "11px")
+      .attr("font-weight", "bold");
+
+    // Load standard world map and official Survey of India boundary simultaneously 
+    Promise.all([
+      d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json"),
+      d3.json("https://raw.githubusercontent.com/datameet/maps/master/Country/india-composite.geojson")
+    ]).then(([worldTopo, indiaGeo]) => {
+      
+      // Extract standard countries
+      let countries = topojson.feature(worldTopo, worldTopo.objects.countries).features;
+
+      // Filter out the standard UN/De-facto India boundary (ISO 356)
+      countries = countries.filter(d => d.id !== "356");
+
+      // Inject Official India Boundary DataMeet GeoJSON
+      const indiaFeatures = indiaGeo.type === "FeatureCollection" ? indiaGeo.features : [indiaGeo];
+      indiaFeatures.forEach(f => {
+        f.id = "356"; 
+        f.properties = f.properties || {};
+        f.properties.name = "India";
+        countries.push(f);
+      });
+
+      // Render map
+      countriesGroup.selectAll("path")
+        .data(countries)
+        .enter()
+        .append("path")
+        .attr("d", path)
+        .attr("class", d => {
+          if (d.id === "356") return "country india";
+          const numericToAlpha3 = { "124":"CAN","032":"ARG","040":"AUT","398":"KAZ","288":"GHA","840":"USA","188":"CRI","191":"HRV","410":"KOR","504":"MAR","484":"MEX","320":"GTM","203":"CZE","608":"PHL","788":"TUN","340":"HND","208":"DNK","702":"SGP","858":"URY","070":"BIH","158":"TWN","120":"CMR","246":"FIN","792":"TUR","218":"ECU","250":"FRA","214":"DOM","268":"GEO","031":"AZE","604":"PER","276":"DEU","364":"IRN","300":"GRC","376":"ISR","348":"HUN","524":"NPL","380":"ITA","643":"RUS","807":"MKD","422":"LBN","499":"MNE","528":"NLD","578":"NOR","616":"POL","620":"PRT","688":"SRB","724":"ESP","756":"CHE","826":"GBR","372":"IRL","642":"ROU","804":"UKR","470":"MLT","705":"SVN" };
+          const alpha3 = numericToAlpha3[d.id];
+          return alpha3 && memberData[alpha3] ? "country has-data" : "country";
+        })
+        .on("mouseover", (event, d) => {
+          const numericToAlpha3 = { "124":"CAN","032":"ARG","040":"AUT","398":"KAZ","288":"GHA","840":"USA","188":"CRI","191":"HRV","410":"KOR","504":"MAR","484":"MEX","320":"GTM","203":"CZE","608":"PHL","788":"TUN","340":"HND","208":"DNK","702":"SGP","858":"URY","070":"BIH","158":"TWN","120":"CMR","246":"FIN","792":"TUR","218":"ECU","250":"FRA","214":"DOM","268":"GEO","031":"AZE","604":"PER","276":"DEU","364":"IRN","300":"GRC","376":"ISR","348":"HUN","524":"NPL","380":"ITA","643":"RUS","807":"MKD","422":"LBN","499":"MNE","528":"NLD","578":"NOR","616":"POL","620":"PRT","688":"SRB","724":"ESP","756":"CHE","826":"GBR","372":"IRL","642":"ROU","804":"UKR","470":"MLT","705":"SVN" };
+          const alpha3 = numericToAlpha3[d.id];
+          if (alpha3 && memberData[alpha3]) {
+            drawFlightRoute(memberData[alpha3]);
+            updateInfoBar(memberData[alpha3]);
+          }
+        })
+        .on("mouseout", () => {
+          clearFlightRoute();
+          resetInfoBar();
+        });
+    }).catch(error => {
+      console.error("Error loading map assets:", error);
+    });
+
+    // Flight Route Generator
+    function drawFlightRoute(data) {
+      clearFlightRoute();
+      
+      const originPos = projection([data.lon, data.lat]);
+      const destPos = projection(delhiCoords);
+
+      const dx = destPos[0] - originPos[0];
+      const dy = destPos[1] - originPos[1];
+      const cx = originPos[0] + dx / 2 - dy * 0.25;
+      const cy = originPos[1] + dy / 2 + dx * 0.25;
+
+      const pathData = `M ${originPos[0]},${originPos[1]} Q ${cx},${cy} ${destPos[0]},${destPos[1]}`;
+
+      routeGroup.append("path")
+        .attr("d", pathData)
+        .attr("class", "flight-arc");
+
+      routeGroup.append("circle")
+        .attr("cx", originPos[0])
+        .attr("cy", originPos[1])
+        .attr("r", 4)
+        .attr("fill", "#00f2fe");
+    }
+
+    function clearFlightRoute() {
+      routeGroup.selectAll("*").remove();
+    }
+
+    // Interactive Bottom Bar with proper Flag images
+    function updateInfoBar(data) {
+      d3.select("#val-flag-emoji").style("display", "none");
+      d3.select("#val-flag-img")
+        .style("display", "block")
+        .attr("src", `https://flagcdn.com/w80/${data.iso2}.png`)
+        .attr("alt", `${data.name} Flag`);
+
+      d3.select("#val-name").text(data.name);
+      d3.select("#val-sub").text("IAPS Member Territory");
+      d3.select("#val-capital").text(data.capital);
+      d3.select("#val-visa").text(data.visa);
+      d3.select("#val-visa-fee").text(data.visaFee);
+      d3.select("#val-flight").text(data.flight);
+      d3.select("#val-time").text(data.time);
+
+      d3.select("#data-items").style("display", "flex");
+    }
+
+    function resetInfoBar() {
+      d3.select("#val-flag-emoji").style("display", "block");
+      d3.select("#val-flag-img").style("display", "none");
+      d3.select("#val-name").text("Hover over a highlighted member country");
+      d3.select("#val-sub").text("View roundtrip airfare baseline, duration, and visa requirements to Delhi");
+      
+      d3.select("#data-items").style("display", "none");
+    }
+
+    const zoom = d3.zoom()
+      .scaleExtent([1, 8])
+      .on("zoom", (event) => g.attr("transform", event.transform));
+
+    svg.call(zoom);
+  </script>
+</body>
+</html>
